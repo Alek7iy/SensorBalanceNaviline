@@ -10,6 +10,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
@@ -211,5 +212,20 @@ public class TrackerBalanceService {
         balance.setBalance(amount);
         balance.setUpdatedAt(LocalDateTime.now());
         balanceRepository.save(balance);
+    }
+    // Запуск каждый день в 09:00 утра (cron: сек мин час день месяц день_недели)
+    @Scheduled(cron = "0 0 9 * * *")
+    public void scheduledBalanceUpdate() {
+        System.out.println(">>> [CRON] Запуск планового обновления баланса SIM-карт...");
+
+        // Список IMEI ваших трекеров (или выборка из репозитория устройств)
+        String targetImei = "869132077330919";
+
+        try {
+            fetchLiveBalanceFromNetwork(targetImei);
+            System.out.println(">>> [CRON] Баланс для IMEI " + targetImei + " успешно обновлен.");
+        } catch (Exception e) {
+            System.err.println(">>> [CRON ERROR] Сбой обновления для " + targetImei + ": " + e.getMessage());
+        }
     }
 }
