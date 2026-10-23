@@ -25,4 +25,3 @@ http://localhost:8080/swagger-ui/index.html#/Баланс%20SIM-карт/getBala
 
 ```bash
 docker run --name pg-local -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres
-
