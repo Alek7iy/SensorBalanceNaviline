@@ -46,28 +46,27 @@ public class TrackerBalanceService {
     public BalanceCommandResponseDto fetchLiveBalanceFromNetwork(String imei) {
         long objectId = 329L;
 
-        // 1. Фиксируем максимальный текущий ID ДО отправки команды
         long lastKnownId = getLatestMessageId();
         System.out.println(">>> [INIT] Последний известный ID в FM: " + lastKnownId);
 
-        // 2. Отправляем SMS-запрос
-        sendBalanceSmsCommand(objectId);
-        System.out.println(">>> [CMD] Команда SENDSMS отправлена для objectId=" + objectId);
+        // Отправляем точную команду
+        sendUssdCommand(objectId, "*100#");
+        System.out.println(">>> [CMD] Команда отправлена для objectId=" + objectId);
 
-        // 3. Ожидаем ответ (SMS может идти дольше, берем 30 попыток по 2.5 сек = ~75 сек)
-        String rawReply = pollForCommandReply(lastKnownId, 30, 2500);
+        // 35 попыток по 2 секунды = 70 секунд (с запасом для сотовой сети)
+        String rawUssdReply = pollForCommandReply(lastKnownId, 35, 2000);
 
-        if (rawReply == null) {
-            throw new IllegalStateException("Таймаут: терминал или сеть МегаФон не прислали SMS-ответ вовремя");
+        if (rawUssdReply == null) {
+            throw new IllegalStateException("Таймаут: терминал или сеть МегаФон не прислали ответ на команду USSD вовремя");
         }
 
-        BigDecimal realBalance = parseBalance(rawReply);
+        BigDecimal realBalance = parseBalance(rawUssdReply);
         saveBalanceToDb(imei, realBalance);
 
         return new BalanceCommandResponseDto(
                 imei,
                 "SUCCESS",
-                "Актуальный баланс получен: " + rawReply,
+                "Актуальный баланс получен: " + rawUssdReply,
                 realBalance,
                 LocalDateTime.now()
         );
@@ -104,9 +103,9 @@ public class TrackerBalanceService {
         return 0;
     }
 
-    private void sendBalanceSmsCommand(long objectId) {
-        // Команда отправки SMS со слота 1 на сервисный номер МегаФон 000100
-        String commandText = "*?SENDSMS 1 000100 0*";
+    private void sendUssdCommand(long objectId, String ussdCode) {
+        // Точный синтаксис Навтелеком из NTC Configurator: *?USSD:*100#
+        String commandText = "*?USSD:" + ussdCode;
         String encodedMessage = URLEncoder.encode(commandText, StandardCharsets.UTF_8);
 
         String urlStr = String.format("%s/api/integration/v1/createcommandmsg?object_id=%d&type=1&message=%s&channel=2",
@@ -161,14 +160,16 @@ public class TrackerBalanceService {
                             System.out.println(">>> [DEBUG FM] id=" + id + ", source=[" + source + "], type=[" + type + "], text=[" + text + "]");
 
                             if (id > minId && "incoming".equalsIgnoreCase(source)) {
-                                // Игнорируем служебные ответы модема (серийный номер, ICCID и т.д.)
+                                // Пропускаем служебные пакеты идентификации
                                 if (text.startsWith("*#S:") || text.startsWith("*#ICCID")) {
-                                    System.out.println(">>> [POLL SKIP] Пропущен служебный пакет: " + text);
                                     continue;
                                 }
 
-                                System.out.println(">>> [POLL] Получено потенциальное сообщение с балансом: " + text);
-                                return text;
+                                // Если пришел ответ на USSD
+                                if (text.contains("USSD") || text.toLowerCase().contains("баланс")) {
+                                    System.out.println(">>> [POLL SUCCESS] Баланс получен: " + text);
+                                    return text;
+                                }
                             }
                         }
                     }
